@@ -1,0 +1,4 @@
+ifcopenshell
+vtk
+PyQt6
+sqlite-utils
