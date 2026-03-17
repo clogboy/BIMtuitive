@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem
+from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QToolBar, QAction, QKeySequence, QFileDialog
 from PyQt6.QtCore import Qt
 
 from core.ifc_loader import IfcLoader
@@ -22,6 +22,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("IFC File Companion")
         self.resize(1400, 900)
 
+        self.toolbar = QToolBar()
+        button_openfile = QAction(self.style().standardIcon(QStyle.SP_DirOpenIcon),
+            "Open Folder...", self)
+        button_openfile.setStatusTip("Open a project folder")
+        button_openfile.setShortcut(QKeySequence.Open)
+        button_openfile.triggered.connect(openfile_button_clicked)
+        self.toolbar.addAction(button_openfile)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.tree = QTreeWidget()
@@ -36,6 +44,13 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
     
+    def openfile_button_clicked(self):
+        self.path = QFileDialog.getExistingDirectory(self, "Select IFC file")
+        if not self.path:
+            return
+
+        self.initModel(path)
+
     def initModel(path):
         loader = IfcLoader()
         model = loader.load(path)
