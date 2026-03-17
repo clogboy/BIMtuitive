@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
 
         self.path = path
 
-        if not path = "":
+        if not path == "":
             initModel(path)
 
         self.setWindowTitle("IFC File Companion")
