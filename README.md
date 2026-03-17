@@ -25,8 +25,8 @@ Is it finished? No, not by a long shot. My roadmap is as follows:
 - A demo plugin to manage files, issues and data in a Solid pod
 
 Instructions:
-Whomever wants to test this product as-is, is welcome to clone this repo. Once in this cloned project folder type the following commands in a terminal window:
+Whomever wants to test this product as-is, is welcome to clone this repo. Once in this cloned project folder it is recommended to test this in a virtual environment with the following commands:
 - python3 -m venv .venv
 - source .venv/bin/activate(.bat for Windows)
-- pip install -r requirements.txt (this will install the qt6, IfcOpenShell, vtk and 
+- pip install -r requirements.txt (this will install the PyQt6, IfcOpenShell, vtk and SqLite-utils dependencies)
 - python3 main.py
