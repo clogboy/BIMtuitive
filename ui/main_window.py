@@ -27,6 +27,8 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Element", "Type"])
 
+        self.viewer = VTKViewer()
+
         splitter.addWidget(self.tree)
         splitter.addWidget(self.viewer)
 
@@ -54,6 +56,3 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, element.id)
 
             self.tree.addTopLevelItem(item)
-
-        self.viewer = VTKViewer()
-
