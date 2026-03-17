@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
         self.toolbar = QToolBar()
         button_openfile = QAction("Open Folder...", self)
         button_openfile.setStatusTip("Open a project folder")
-        button_openfile.triggered.connect(openfile_button_clicked)
+        button_openfile.triggered.connect(self.openfile_button_clicked)
         self.toolbar.addAction(button_openfile)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
