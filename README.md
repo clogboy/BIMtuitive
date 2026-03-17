@@ -10,12 +10,12 @@ The intent to support plugins that interact with the data will make it possible 
 Is it finished? No, not by a long shot. The main functionality "exists", but will be tested and optimised according to the following roadmap:
 
 - UI development
-- Loading and testing IFC data
+- Loading IFC data
+- Navigating mesh geometry
 - Displaying objects in the context of spatial containment relations (treeview)
 - Displaying property sets for selected elements
-- Navigating mesh geometry and selecting objects
 - SQL-native data management
-- Performance optimisations
+- Model navigation and object selection
 - API interfacing
 - Documentation
 
