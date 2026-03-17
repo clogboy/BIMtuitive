@@ -24,10 +24,8 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self.toolbar = QToolBar()
-        button_openfile = QAction(self.style().standardIcon(QStyle.SP_DirOpenIcon),
-            "Open Folder...", self)
+        button_openfile = QAction("Open Folder...", self)
         button_openfile.setStatusTip("Open a project folder")
-        button_openfile.setShortcut(QKeySequence.Open)
         button_openfile.triggered.connect(openfile_button_clicked)
         self.toolbar.addAction(button_openfile)
 
