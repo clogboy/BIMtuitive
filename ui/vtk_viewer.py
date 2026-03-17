@@ -17,7 +17,7 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
         self.setup_scene()
 
-        self.interactor.Initialize()
+        # self.interactor.Initialize()
 
 
     def setup_scene(self):
