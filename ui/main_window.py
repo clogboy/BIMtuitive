@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QToolBar, QFileDialog
+from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QToolBar, QFileDialog, QStyle
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence, QAction, QStyle
+from PyQt6.QtGui import QKeySequence, QAction
 
 from core.ifc_loader import IfcLoader
 from core.model_index import ModelIndex
