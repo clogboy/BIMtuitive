@@ -7,7 +7,7 @@ I'm in the very early stages of development, but when I'm done this will be one 
 Why SQL? Because I believe that BIM should be based on accessible tools that run on any hardware and operating system. In practice, any product that consumes IFC data will store it in its own native format. So to me it makes sense that versioned data should live as a queriable source of truth. as long as it can still maintain a reference to its geometric context.
 The intent to support plugins that interact with the data will make it possible to use this viewer for cost estimation, planning, logistics and other project management operations in a way that should enable everyone to work with the same version of the project data which can be easily updated and synchronised with third party data sources.
 
-Is it finished? No, not by a long shot. My roadmap is as follows:
+Is it finished? No, not by a long shot. The main functionality "exists", but will be tested and optimised according to the following roadmap:
 
 - UI development
 - Loading and testing IFC data
