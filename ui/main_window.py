@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QToolBar, QFileDialog, QStyle
+from PyQt6.QtWidgets import QMainWindow, QSplitter, QTreeWidget, QTreeWidgetItem, QToolBar, QFileDialog
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence, QAction
+from PyQt6.QtGui import QAction
 
 from core.ifc_loader import IfcLoader
 from core.model_index import ModelIndex
@@ -14,22 +14,19 @@ class MainWindow(QMainWindow):
     def __init__(self, _path: str = ""):
 
         super().__init__()
-
-        path = _path
-
-        if not path == "":
-            self.initModel(path)
-
         self.setWindowTitle("IFC File Companion")
         self.resize(1400, 900)
 
-        toolbar = QToolBar()
-        button_openfile = QAction("Open Folder...", self)
-        button_openfile.setStatusTip("Open a project folder")
-        button_openfile.triggered.connect(self.openfile_button_clicked)
-        toolbar.addAction(button_openfile)
+        self.path = ""
+        self._build_ui()
 
-        self.addToolBar(toolbar)
+        if _path:
+            self._init_model(_path)
+
+
+    def _build_ui(self):
+
+        self._add_toolbar()
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -40,19 +37,31 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self.tree)
         splitter.addWidget(self.viewer)
-
         splitter.setSizes([350, 1050])
 
         self.setCentralWidget(splitter)
+
+
+    def _add_toolbar(self):
+
+        toolbar = QToolBar()
+        open_action = QAction("Load IFC", self)
+        open_action.setStatusTip("Open an IFC file")
+        open_action.triggered.connect(self._open_file_button_clicked)
+        toolbar.addAction(open_action)
+
+        self.addToolBar(toolbar)
     
-    def openfile_button_clicked(self):
-        self.path = QFileDialog.getExistingDirectory(self, "Select IFC file")
+
+    def _open_file_button_clicked(self):
+        self.path, _ = QFileDialog.getOpenFileName(self, "Select IFC file", "", "IFC Files (*.ifc)")
         if not self.path:
             return
 
-        self.initModel(self.path)
+        self._init_model(self.path)
 
-    def initModel(self, path):
+
+    def _init_model(self, path):
         loader = IfcLoader()
         model = loader.load(path)
 
@@ -62,12 +71,15 @@ class MainWindow(QMainWindow):
         db = SQLStore("model.db")
         db.store(index)
 
+        self._populate_tree(index)
+
+
+    def _populate_tree(self, index):
+        self.tree.clear()
+
         for element in index.elements:
 
-            item = QTreeWidgetItem([
-                element.name,
-                element.type
-            ])
+            item = QTreeWidgetItem([element.name, element.type])
 
             item.setData(0, Qt.ItemDataRole.UserRole, element.id)
 
