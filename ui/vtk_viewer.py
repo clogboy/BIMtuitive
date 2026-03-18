@@ -24,9 +24,9 @@ class VTKViewer(QVTKRenderWindowInteractor):
         self.interactor.SetInteractorStyle(style)
 
         camera = self.renderer.GetActiveCamera()
-        camera.SetViewUp(self._z_up)
+        camera.SetViewUp(*self._z_up)
 
-        self.interactor.AddObserver("EndInteractionEvent", self._enforce_z_up)
+        self.interactor.AddObserver(vtk.vtkCommand.EndInteractionEvent, self._enforce_z_up)
 
         self._interactor_initialized = False
         self._mesh_helper = IfcVtkMeshHelper()
@@ -70,11 +70,11 @@ class VTKViewer(QVTKRenderWindowInteractor):
     def _setup_scene(self):
 
         self.renderer.SetBackground(0.1, 0.1, 0.15)
-        self.renderer.SetUseDepthPeeling(True)
-        self.renderer.SetMaximumNumberOfPeels(16)
-        self.renderer.SetOcclusionRatio(0.1)
+        self.renderer.SetUseDepthPeeling(False)
+        self.renderer.SetMaximumNumberOfPeels(4)
+        self.renderer.SetOcclusionRatio(0.2)
 
-        self.render_window.SetAlphaBitPlanes(1)
+        self.render_window.SetAlphaBitPlanes(0)
         self.render_window.SetMultiSamples(0)
 
         self.renderer.ResetCamera()

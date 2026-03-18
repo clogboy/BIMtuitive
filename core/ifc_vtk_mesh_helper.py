@@ -4,32 +4,32 @@ import vtk
 
 class IfcVtkMeshHelper:
 
+    DEFAULT_STYLE = (180, 180, 185, 1.0, 0.15)
+
     def __init__(self):
 
-        self.geom = geom
-        if self.geom is None:
+        if geom is None:
             self.settings = None
             return
 
-        self.settings = self.geom.settings()
+        self.settings = geom.settings()
         self.settings.set(self.settings.USE_WORLD_COORDS, True)
 
 
     def build_actors(self, model):
 
-        if self.geom is None or self.settings is None:
+        if self.settings is None:
             return [], 0
 
-        grouped_poly_data = {}
-        included = 0
+        grouped = {}
+        count = 0
 
         for element in model.by_type("IfcProduct"):
-
             if not getattr(element, "Representation", None):
                 continue
 
             try:
-                shape = self.geom.create_shape(self.settings, element)
+                shape = geom.create_shape(self.settings, element)
             except Exception:
                 continue
 
@@ -37,41 +37,25 @@ class IfcVtkMeshHelper:
             if geometry is None:
                 continue
 
-            material_groups = self._to_poly_data_by_material(geometry)
-            if not material_groups:
+            groups = self._to_poly_data_by_material(geometry)
+            if not groups:
                 continue
 
-            for signature, poly_data in material_groups.items():
-                grouped_poly_data.setdefault(signature, []).append(poly_data)
+            for signature, poly_data in groups.items():
+                grouped.setdefault(signature, []).append(poly_data)
 
-            included += 1
+            count += 1
 
-        if included == 0:
+        if count == 0:
             return [], 0
 
         actors = []
-        for signature, poly_data_parts in grouped_poly_data.items():
-            actor = self._build_actor_from_parts(signature, poly_data_parts)
+        for signature, parts in grouped.items():
+            actor = self._build_actor_from_parts(signature, parts)
             if actor is not None:
                 actors.append(actor)
 
-        return actors, included
-
-
-    def build_actor(self, model):
-        # Backward-compatible wrapper for older call sites.
-        actors, included = self.build_actors(model)
-        if not actors:
-            return None, 0
-
-        if len(actors) == 1:
-            return actors[0], included
-
-        assembly = vtk.vtkAssembly()
-        for actor in actors:
-            assembly.AddPart(actor)
-
-        return assembly, included
+        return actors, count
 
 
     def _build_actor_from_parts(self, signature, poly_data_parts):
@@ -100,7 +84,7 @@ class IfcVtkMeshHelper:
         normals.NonManifoldTraversalOn()
         normals.AutoOrientNormalsOn()
         normals.SplittingOn()
-        normals.SetFeatureAngle(55.0)
+        normals.SetFeatureAngle(50.0)
         normals.Update()
 
         mapper = vtk.vtkPolyDataMapper()
@@ -110,41 +94,22 @@ class IfcVtkMeshHelper:
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
 
-        style = self._style_from_signature(signature)
         prop = actor.GetProperty()
-        prop.SetColor(style["diffuse"])
-        prop.SetOpacity(style["opacity"])
+        prop.SetColor(signature[0], signature[1], signature[2])
+        prop.SetOpacity(signature[3])
         prop.SetAmbient(0.2)
         prop.SetDiffuse(0.8)
-        prop.SetSpecular(style["specular_strength"])
-        prop.SetSpecularPower(style["specular_power"])
+        prop.SetSpecular(signature[4])
+        prop.SetSpecularPower(25.0)
         prop.SetInterpolationToPhong()
-        prop.BackfaceCullingOff()
+        prop.BackfaceCullingOn()
 
         return actor
 
 
-    def _style_from_signature(self, signature):
-
-        r, g, b, opacity, specular = signature
-        return {
-            "diffuse": (r / 255.0, g / 255.0, b / 255.0),
-            "opacity": max(0.02, min(1.0, opacity)),
-            "specular_strength": max(0.0, min(1.0, specular)),
-            "specular_power": 70.0,
-        }
-
-
     def _extract_geometry(self, shape):
-
-        # Depending on IfcOpenShell build/settings, create_shape may return
-        # an object with .geometry or the geometry-like object directly.
         geometry = getattr(shape, "geometry", shape)
-
-        if not hasattr(geometry, "verts") or not hasattr(geometry, "faces"):
-            return None
-
-        return geometry
+        return geometry if hasattr(geometry, "verts") and hasattr(geometry, "faces") else None
 
 
     def _to_poly_data_by_material(self, geometry):
@@ -154,23 +119,18 @@ class IfcVtkMeshHelper:
         if not vertices or not faces:
             return {}
 
+        styles = self._build_material_palette(getattr(geometry, "materials", []) or [])
         material_ids = list(getattr(geometry, "material_ids", []) or [])
-        materials = list(getattr(geometry, "materials", []) or [])
-        palette = self._build_material_palette(materials)
 
         groups = {}
 
         def ensure_group(signature):
-            if signature in groups:
-                return groups[signature]
-            points = vtk.vtkPoints()
-            triangles = vtk.vtkCellArray()
-            index_map = {}
-            groups[signature] = {
-                "points": points,
-                "triangles": triangles,
-                "index_map": index_map,
-            }
+            if signature not in groups:
+                groups[signature] = {
+                    "points": vtk.vtkPoints(),
+                    "triangles": vtk.vtkCellArray(),
+                    "index_map": {},
+                }
             return groups[signature]
 
         def remap_point(group, source_index):
@@ -179,9 +139,7 @@ class IfcVtkMeshHelper:
                 return idx
 
             base = source_index * 3
-            new_idx = group["points"].InsertNextPoint(
-                vertices[base], vertices[base + 1], vertices[base + 2]
-            )
+            new_idx = group["points"].InsertNextPoint(vertices[base], vertices[base + 1], vertices[base + 2])
             group["index_map"][source_index] = new_idx
             return new_idx
 
@@ -189,7 +147,7 @@ class IfcVtkMeshHelper:
         for i in range(0, len(faces), 3):
             tri_idx = i // 3
             material_index = self._resolve_material_index(material_ids, triangle_count, tri_idx, i)
-            signature = self._style_signature_from_palette(palette, material_index)
+            signature = self._style_signature_from_palette(styles, material_index)
 
             group = ensure_group(signature)
 
@@ -216,12 +174,10 @@ class IfcVtkMeshHelper:
 
         palette = []
         for material in materials:
-            diffuse = self._rgb255_from_colour(getattr(material, "diffuse", None))
-            transparency = self._number_value(getattr(material, "transparency", None), default=0.0)
-            specular = self._specular_strength(getattr(material, "specular", None))
-            opacity = max(0.0, min(1.0, 1.0 - transparency))
-
-            palette.append((diffuse[0], diffuse[1], diffuse[2], opacity, specular))
+            r, g, b = self._rgb255_from_colour(getattr(material, "diffuse", None))
+            t = self._to_float(getattr(material, "transparency", None), 0.0) or 0.0
+            s = self._specular_strength(getattr(material, "specular", None))
+            palette.append((r / 255.0, g / 255.0, b / 255.0, max(0.02, min(1.0, 1.0 - t)), s))
 
         return palette
 
@@ -239,11 +195,7 @@ class IfcVtkMeshHelper:
         if r is None or g is None or b is None:
             return default
 
-        return (
-            max(0, min(255, int(r * 255))),
-            max(0, min(255, int(g * 255))),
-            max(0, min(255, int(b * 255))),
-        )
+        return max(0, min(255, int(r * 255))), max(0, min(255, int(g * 255))), max(0, min(255, int(b * 255)))
 
 
     def _specular_strength(self, specular):
@@ -259,25 +211,7 @@ class IfcVtkMeshHelper:
                 return 0.15
             return max(0.0, min(1.0, (r + g + b) / 3.0))
 
-        value = self._number_value(specular, default=0.15)
-        return max(0.0, min(1.0, value))
-
-
-    def _number_value(self, value, default=0.0):
-
-        if value is None:
-            return default
-
-        if callable(value):
-            try:
-                value = value()
-            except Exception:
-                return default
-
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return default
+        return max(0.0, min(1.0, self._to_float(specular, 0.15) or 0.15))
 
 
     def _component_value(self, colour, name):
@@ -292,10 +226,7 @@ class IfcVtkMeshHelper:
             except Exception:
                 return None
 
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return None
+        return self._to_float(value)
 
 
     def _resolve_material_index(self, material_ids, triangle_count, triangle_index, face_index):
@@ -305,23 +236,31 @@ class IfcVtkMeshHelper:
 
         if len(material_ids) == triangle_count:
             return material_ids[triangle_index]
-
-        # Some builds expose material ids per face index list entry.
         if len(material_ids) == triangle_count * 3 and face_index < len(material_ids):
             return material_ids[face_index]
-
-        if triangle_index < len(material_ids):
-            return material_ids[triangle_index]
-
-        return None
+        return material_ids[triangle_index] if triangle_index < len(material_ids) else None
 
 
     def _style_signature_from_palette(self, palette, material_index):
 
-        if material_index is None:
-            return 180, 180, 185, 1.0, 0.15
-
-        if 0 <= material_index < len(palette):
+        if material_index is not None and 0 <= material_index < len(palette):
             return palette[material_index]
 
-        return 180, 180, 185, 1.0, 0.15
+        return self.DEFAULT_STYLE
+
+
+    def _to_float(self, value, default=None):
+
+        if value is None:
+            return default
+
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                return default
+
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return default

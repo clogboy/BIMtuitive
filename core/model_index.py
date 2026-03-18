@@ -14,15 +14,11 @@ class ModelIndex:
         self.elements = []
 
     def build(self, model):
-
-        for element in model.by_type("IfcProduct"):
-
-            name = element.Name if element.Name else "Unnamed"
-
-            node = ElementNode(
+        self.elements = [
+            ElementNode(
                 element.id(),
-                name,
-                element.is_a()
+                element.Name if element.Name else "Unnamed",
+                element.is_a(),
             )
-
-            self.elements.append(node)
+            for element in model.by_type("IfcProduct")
+        ]
