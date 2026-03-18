@@ -1,5 +1,5 @@
 import vtk
-from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QCloseEvent, QShowEvent
 
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
@@ -12,15 +12,29 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
         self.renderer = vtk.vtkRenderer()
 
-        self.GetRenderWindow().AddRenderer(self.renderer)
+        self.render_window = self.GetRenderWindow()
+        self.render_window.AddRenderer(self.renderer)
 
-        self.interactor = self.GetRenderWindow().GetInteractor()
+        self.interactor = self.render_window.GetInteractor()
         self._interactor_initialized = False
 
         self.setup_scene()
 
-        # Defer Initialize naar de Qt eventloop om thread/race issues bij widget-creatie te vermijden.
-        QTimer.singleShot(0, self._initialize_interactor)
+
+    def showEvent(self, event: QShowEvent):
+
+        super().showEvent(event)
+        self._initialize_interactor()
+
+
+    def closeEvent(self, event: QCloseEvent):
+
+        # Ensure VTK/X11 resources are released before Qt thread teardown.
+        if self._interactor_initialized:
+            self.interactor.Disable()
+            self.render_window.Finalize()
+            self._interactor_initialized = False
+        super().closeEvent(event)
 
 
     def _initialize_interactor(self):
@@ -29,6 +43,8 @@ class VTKViewer(QVTKRenderWindowInteractor):
             return
 
         self.interactor.Initialize()
+        self.render_window.Render()
+
         self._interactor_initialized = True
 
 
