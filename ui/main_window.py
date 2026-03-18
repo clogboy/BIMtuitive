@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         db.store(index)
 
         self._populate_tree(index)
+        self.viewer.load_ifc_model(model)
 
 
     def _populate_tree(self, index):

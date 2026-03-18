@@ -2,12 +2,13 @@
 
 Welcome to BIMtuitive!
 
-I'm in the very early stages of development, but when I'm done this will be one of the first open source, extensible IFC viewers. The aim is to make this a cross-platform solution (written in Python and based on QT6, IfcOpenShell, SQL and OpenGL) which exports the IFC data to a fast performing, queriable SQL database and supports plugins. Performance and ease of use are a main focus.
+This project is in a very early stage. The goal is to build an open source, extensible IFC viewer that runs cross-platform. It is written in Python and built on Qt6, IfcOpenShell, SQL, and OpenGL. The core idea is to export IFC data into a fast, queryable SQL database and support plugins. Performance and ease of use are key priorities.
 
-Why SQL? Because I believe that BIM should be based on accessible tools that run on any hardware and operating system. In practice, any product that consumes IFC data will store it in its own native format. So to me it makes sense that versioned data should live as a queriable source of truth. as long as it can still maintain a reference to its geometric context.
-The intent to support plugins that interact with the data will make it possible to use this viewer for cost estimation, planning, logistics and other project management operations in a way that should enable everyone to work with the same version of the project data which can be easily updated and synchronised with third party data sources.
+Why SQL? I believe BIM should rely on accessible tools that can run on any hardware and operating system. In practice, every product that consumes IFC data stores it in its own native format. For that reason, it makes sense to keep versioned project data in a queryable source of truth, while still preserving references to geometric context.
 
-Is it finished? No, not by a long shot. The main functionality "exists", but will be tested and optimised according to the following roadmap:
+Plugin support is intended to make the viewer useful for workflows such as cost estimation, planning, logistics, and other project-management tasks. The aim is to help teams work from the same version of project data and synchronize it with third-party sources.
+
+Is it finished? Not even close. The main functionality exists, but it still needs testing and optimization. Current roadmap:
 
 - UI development
 - Loading IFC data
@@ -19,14 +20,15 @@ Is it finished? No, not by a long shot. The main functionality "exists", but wil
 - API interfacing
 - Documentation
 
-- BONUS:
+Bonus:
 - Additional relational contexts to organise elements
 - Multi-model support
 - A demo plugin to manage files, issues and data in a Solid pod
 
 Instructions:
-Whomever wants to test this product as-is, is welcome to clone this repo. Once in this cloned project folder it is recommended to test this in a virtual environment with the following commands:
+If you want to test the project as-is, clone this repository and run it in a virtual environment:
+
 - python3 -m venv .venv
-- source .venv/bin/activate(.bat for Windows)
-- pip install -r requirements.txt (this will install the PyQt6, IfcOpenShell, vtk and SqLite-utils dependencies)
+- source .venv/bin/activate  (.bat on Windows)
+- pip install -r requirements.txt  (installs PyQt6, IfcOpenShell, vtk, and sqlite-utils)
 - python3 main.py
