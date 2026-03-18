@@ -11,14 +11,14 @@ from ui.vtk_viewer import VTKViewer
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, path):
+    def __init__(self, _path: str = ""):
 
         super().__init__()
 
-        self.path = path
+        path = _path
 
         if not path == "":
-            initModel(path)
+            self.initModel(path)
 
         self.setWindowTitle("IFC File Companion")
         self.resize(1400, 900)
@@ -50,9 +50,9 @@ class MainWindow(QMainWindow):
         if not self.path:
             return
 
-        self.initModel(path)
+        self.initModel(self.path)
 
-    def initModel(path):
+    def initModel(self, path):
         loader = IfcLoader()
         model = loader.load(path)
 
@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
         db = SQLStore("model.db")
         db.store(index)
 
-        for element in self.index.elements:
+        for element in index.elements:
 
             item = QTreeWidgetItem([
                 element.name,
