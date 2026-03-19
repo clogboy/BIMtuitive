@@ -36,5 +36,7 @@ The reason for this is to maintain any dependencies contained to the project fol
 Activate it. On Linux: type "source .venv/bin/activate". On Windows, type ".venv\scripts\activate". Windows users will probably have to enable script execution first.
 This can be done in a PowerShell window with admin privileges, by typing "Set-ExecutionPolicy RemoteSigned".
 
-If you see the .venv prefix in your command window, type "pip install -r requirements.txt". This will install all dependencies that are mentioned in requirements.txt.
+If you see the .venv prefix in your command window, type "pip install -r requirements.txt". This will install all dependencies that are mentioned in requirements.txt
+within the virtual environment of your cloned repository.
+
 When this is complete, start the program with "python3 main.py"
