@@ -26,9 +26,15 @@ Bonus:
 - A demo plugin to manage files, issues and data in a Solid pod
 
 Instructions:
-If you want to test the project as-is, clone this repository and run it in a virtual environment:
+Once the program is completed I will create binaries to streamline the installation or run the IFC File Companion as a portable, stand-alone executable/appimage.
 
-- python3 -m venv .venv
-- source .venv/bin/activate  (.bat on Windows)
-- pip install -r requirements.txt  (installs PyQt6, IfcOpenShell, vtk, and sqlite-utils)
-- python3 main.py
+If you want to test the project as-is, clone this repository and run it in a virtual environment:
+Make sure to have Python 3.x installed on your machine, and added as a PATH variable (happens automatically on Linux, needs admin permission on Windows).
+Open a command window in the cloned repository and type "python3 -m venv .venv". This creates a version of the Python environment in the project folder.
+The reason for this is to maintain any dependencies contained to the project folder instead of installing them system-wide.
+
+Activate it. On Linux: type "source .venv/bin/activate". On Windows, type ".venv\scripts\activate". Windows users will probably have to enable script execution first.
+This can be done in a PowerShell window with admin privileges, by typing "Set-ExecutionPolicy RemoteSigned".
+
+If you see the .venv prefix in your command window, type "pip install -r requirements.txt". This will install all dependencies that are mentioned in requirements.txt.
+When this is complete, start the program with "python3 main.py"
