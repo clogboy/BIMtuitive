@@ -1,6 +1,8 @@
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QStatusBar,
     QSplitter,
@@ -10,6 +12,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction
+
+import ifcopenshell.util.element
 
 from core.ifc_loader import IfcLoader
 from core.model_index import ModelIndex
@@ -60,6 +64,7 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self.path = ""
+        self.model = None
         self._load_thread = None
         self._load_worker = None
         self._init_status_bar()
@@ -78,9 +83,13 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Element"])
         self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.itemExpanded.connect(self._on_tree_item_expanded)
+        self.tree.itemDoubleClicked.connect(self._on_element_selected)
 
         self.viewer = VTKViewer()
+        self.viewer.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.viewer.customContextMenuRequested.connect(self._on_viewer_context_menu)
 
         splitter.addWidget(self.tree)
         splitter.addWidget(self.viewer)
@@ -88,6 +97,74 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(splitter)
 
+    def _on_element_selected(self, item, _column):
+        if self.model is None:
+            return
+
+        node = item.data(0, self.NODE_ROLE)
+        if not node:
+            return
+
+        node_id = node.get("id")
+        if not node_id:
+            return
+
+        element = self.model.by_guid(node_id)
+        if element is None:
+            return
+
+        psets = ifcopenshell.util.element.get_psets(element)
+        isolated = self.viewer.isolate_elements([element], zoom=True)
+        print(f"{node.get('type')} {node.get('name')} ({node_id})")
+        print(psets)
+        if isolated:
+            self._status_bar.showMessage(f"Loaded {len(psets)} property sets and isolated {node.get('name')}")
+        else:
+            self._status_bar.showMessage(f"Loaded {len(psets)} property sets for {node.get('name')}")
+
+
+    def _selected_elements_from_tree(self):
+
+        if self.model is None:
+            return []
+
+        selected_elements = []
+        for item in self.tree.selectedItems():
+            node = item.data(0, self.NODE_ROLE)
+            if node:
+                selected_elements.append(self.model.by_guid(node.get("id")))
+
+        return [e for e in selected_elements if e is not None]
+
+
+    def _on_viewer_context_menu(self, position):
+
+        menu = QMenu(self)
+
+        selected_elements = self._selected_elements_from_tree()
+        can_show_selected = len(selected_elements) > 0
+        can_show_all = self.viewer.can_show_all()
+
+        show_selected_action = QAction("Show Selected", self)
+        show_selected_action.setEnabled(can_show_selected)
+        menu.addAction(show_selected_action)
+
+        show_all_action = QAction("Show All", self)
+        show_all_action.setEnabled(can_show_all)
+        menu.addAction(show_all_action)
+
+        action = menu.exec(self.viewer.mapToGlobal(position))
+        if action == show_selected_action:
+            isolated = self.viewer.isolate_elements(selected_elements, zoom=True)
+            if isolated:
+                self._status_bar.showMessage(f"Isolated {len(selected_elements)} selected element(s)")
+            else:
+                self._status_bar.showMessage("Could not isolate selected elements")
+        elif action == show_all_action:
+            self.viewer.show_all_model(reset_camera=True)
+            self.tree.clearSelection()
+            self.tree.setCurrentItem(None)
+            self._status_bar.showMessage("Full model restored")
 
     def _init_status_bar(self):
 
@@ -121,7 +198,6 @@ class MainWindow(QMainWindow):
 
         self._init_model(self.path)
 
-
     def _init_model(self, path):
         if self._load_thread is not None:
             return
@@ -147,6 +223,7 @@ class MainWindow(QMainWindow):
     def _set_loading(self, active, message):
 
         self.progress.setVisible(active)
+        self.setCursor(Qt.CursorShape.WaitCursor if active else Qt.CursorShape.ArrowCursor)
         self._status_bar.showMessage(message)
 
 
@@ -157,6 +234,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object, object)
     def _on_model_loaded(self, model, node):
+
+        self.model = model
 
         self._step_loading("Building tree...")
         self._populate_tree(node)
@@ -199,6 +278,8 @@ class MainWindow(QMainWindow):
         finally:
             self.tree.blockSignals(False)
             self.tree.setUpdatesEnabled(True)
+
+        self.tree.sortItems(0, Qt.SortOrder.AscendingOrder)
 
 
     def _create_node_item(self, node):

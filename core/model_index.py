@@ -69,7 +69,7 @@ class ModelIndex:
 
         node = {
             "id": guid,
-            "name": obj.Name if obj.Name else "Unnamed",
+            "name": self._display_name(obj),
             "type": obj.is_a(),
             "children": []
         }
@@ -89,9 +89,20 @@ class ModelIndex:
 
             node["children"].append({
                 "id": child_id,
-                "name": child_obj.Name if child_obj.Name else "Unnamed",
+                "name": self._display_name(child_obj),
                 "type": child_obj.is_a(),
                 "children": []
             })
 
         return node
+
+
+    def _display_name(self, obj):
+
+        name = getattr(obj, "Name", None) or "Unnamed"
+        long_name = getattr(obj, "LongName", None)
+
+        if long_name and long_name != name:
+            return f"{name}: {long_name}"
+
+        return name

@@ -58,6 +58,36 @@ class IfcVtkMeshHelper:
         return actors, count
 
 
+    def build_element_actors(self, element):
+
+        if self.settings is None or element is None:
+            return []
+
+        if not getattr(element, "Representation", None):
+            return []
+
+        try:
+            shape = geom.create_shape(self.settings, element)
+        except Exception:
+            return []
+
+        geometry = self._extract_geometry(shape)
+        if geometry is None:
+            return []
+
+        groups = self._to_poly_data_by_material(geometry)
+        if not groups:
+            return []
+
+        actors = []
+        for signature, poly_data in groups.items():
+            actor = self._build_actor_from_parts(signature, [poly_data])
+            if actor is not None:
+                actors.append(actor)
+
+        return actors
+
+
     def _build_actor_from_parts(self, signature, poly_data_parts):
 
         append_filter = vtk.vtkAppendPolyData()
