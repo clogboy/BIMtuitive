@@ -1,8 +1,8 @@
 from ifcopenshell import geom
-import vtk
+import numpy as np
 
 
-class IfcVtkMeshHelper:
+class IfcVispyMeshHelper:
 
     DEFAULT_STYLE = (180, 180, 185, 1.0, 0.15)
 
@@ -41,21 +41,23 @@ class IfcVtkMeshHelper:
             if not groups:
                 continue
 
-            for signature, poly_data in groups.items():
-                grouped.setdefault(signature, []).append(poly_data)
+            for signature, mesh in groups.items():
+                grouped.setdefault(signature, []).append(mesh)
 
             count += 1
 
         if count == 0:
             return [], 0
 
-        actors = []
+        meshes = []
         for signature, parts in grouped.items():
-            actor = self._build_actor_from_parts(signature, parts)
-            if actor is not None:
-                actors.append(actor)
+            merged = self._merge_mesh_parts(parts)
+            if merged is not None:
+                vertices, faces = merged
+                faces = self._fix_winding(vertices, faces)
+                meshes.append({"vertices": vertices, "faces": faces, "style": signature})
 
-        return actors, count
+        return meshes, count
 
 
     def build_element_actors(self, element):
@@ -79,62 +81,48 @@ class IfcVtkMeshHelper:
         if not groups:
             return []
 
-        actors = []
-        for signature, poly_data in groups.items():
-            actor = self._build_actor_from_parts(signature, [poly_data])
-            if actor is not None:
-                actors.append(actor)
+        meshes = []
+        for signature, mesh in groups.items():
+            vertices, faces = mesh
+            faces = self._fix_winding(vertices, faces)
+            meshes.append({"vertices": vertices, "faces": faces, "style": signature})
 
-        return actors
+        return meshes
 
 
-    def _build_actor_from_parts(self, signature, poly_data_parts):
+    def _merge_mesh_parts(self, parts):
 
-        append_filter = vtk.vtkAppendPolyData()
-        for part in poly_data_parts:
-            append_filter.AddInputData(part)
-
-        if append_filter.GetNumberOfInputConnections(0) == 0:
+        if not parts:
             return None
 
-        append_filter.Update()
+        if len(parts) == 1:
+            return parts[0]
 
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(append_filter.GetOutputPort())
-        clean.ConvertLinesToPointsOff()
-        clean.ConvertPolysToLinesOff()
-        clean.ConvertStripsToPolysOn()
-        clean.Update()
+        vertices_chunks = []
+        faces_chunks = []
+        offset = 0
+        for vertices, faces in parts:
+            vertices_chunks.append(vertices)
+            faces_chunks.append(faces + offset)
+            offset += len(vertices)
 
-        normals = vtk.vtkPolyDataNormals()
-        normals.SetInputConnection(clean.GetOutputPort())
-        normals.ComputePointNormalsOn()
-        normals.ComputeCellNormalsOff()
-        normals.ConsistencyOn()
-        normals.NonManifoldTraversalOn()
-        normals.AutoOrientNormalsOn()
-        normals.SplittingOn()
-        normals.SetFeatureAngle(50.0)
-        normals.Update()
+        return np.vstack(vertices_chunks), np.vstack(faces_chunks)
 
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(normals.GetOutputPort())
-        mapper.ScalarVisibilityOff()
 
-        actor = vtk.vtkActor()
-        actor.SetMapper(mapper)
+    def _fix_winding(self, vertices, faces):
 
-        prop = actor.GetProperty()
-        prop.SetColor(signature[0], signature[1], signature[2])
-        prop.SetOpacity(signature[3])
-        prop.SetInterpolationToPhong()
-        prop.SetAmbient(0.15)
-        prop.SetDiffuse(0.85)
-        prop.SetSpecular(min(0.2, signature[4]))
-        prop.SetSpecularPower(20.0)
-        prop.BackfaceCullingOff()
+        if len(vertices) == 0 or len(faces) == 0:
+            return faces
 
-        return actor
+        v0 = vertices[faces[:, 0]]
+        v1 = vertices[faces[:, 1]]
+        v2 = vertices[faces[:, 2]]
+        signed_volume = np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0
+
+        if signed_volume < 0.0:
+            return faces[:, [0, 2, 1]]
+
+        return faces
 
 
     def _extract_geometry(self, shape):
@@ -149,55 +137,51 @@ class IfcVtkMeshHelper:
         if not vertices or not faces:
             return {}
 
+        verts = np.asarray(vertices, dtype=np.float32).reshape(-1, 3)
+        tris = np.asarray(faces, dtype=np.uint32).reshape(-1, 3)
+        if len(tris) == 0:
+            return {}
+
         styles = self._build_material_palette(getattr(geometry, "materials", []) or [])
         material_ids = list(getattr(geometry, "material_ids", []) or [])
+        tri_materials = self._triangle_material_indices(material_ids, len(tris))
 
-        groups = {}
+        mesh_by_material = {}
+        for material_index in np.unique(tri_materials):
+            signature = self._style_signature_from_palette(styles, None if material_index < 0 else int(material_index))
 
-        def ensure_group(signature):
-            if signature not in groups:
-                groups[signature] = {
-                    "points": vtk.vtkPoints(),
-                    "triangles": vtk.vtkCellArray(),
-                    "index_map": {},
-                }
-            return groups[signature]
-
-        def remap_point(group, source_index):
-            idx = group["index_map"].get(source_index)
-            if idx is not None:
-                return idx
-
-            base = source_index * 3
-            new_idx = group["points"].InsertNextPoint(vertices[base], vertices[base + 1], vertices[base + 2])
-            group["index_map"][source_index] = new_idx
-            return new_idx
-
-        triangle_count = len(faces) // 3
-        for i in range(0, len(faces), 3):
-            tri_idx = i // 3
-            material_index = self._resolve_material_index(material_ids, triangle_count, tri_idx, i)
-            signature = self._style_signature_from_palette(styles, material_index)
-
-            group = ensure_group(signature)
-
-            triangle = vtk.vtkTriangle()
-            triangle.GetPointIds().SetId(0, remap_point(group, faces[i]))
-            triangle.GetPointIds().SetId(1, remap_point(group, faces[i + 1]))
-            triangle.GetPointIds().SetId(2, remap_point(group, faces[i + 2]))
-            group["triangles"].InsertNextCell(triangle)
-
-        poly_data_by_material = {}
-        for signature, group in groups.items():
-            if group["points"].GetNumberOfPoints() == 0:
+            selected = tri_materials == material_index
+            group_faces = tris[selected]
+            if len(group_faces) == 0:
                 continue
 
-            poly_data = vtk.vtkPolyData()
-            poly_data.SetPoints(group["points"])
-            poly_data.SetPolys(group["triangles"])
-            poly_data_by_material[signature] = poly_data
+            unique_indices, inverse = np.unique(group_faces.reshape(-1), return_inverse=True)
+            group_vertices = verts[unique_indices]
+            remapped_faces = inverse.reshape(-1, 3).astype(np.uint32)
 
-        return poly_data_by_material
+            mesh_by_material[signature] = (group_vertices, remapped_faces)
+
+        return mesh_by_material
+
+
+    def _triangle_material_indices(self, material_ids, triangle_count):
+
+        if triangle_count == 0:
+            return np.empty((0,), dtype=np.int32)
+
+        if not material_ids:
+            return np.full((triangle_count,), -1, dtype=np.int32)
+
+        arr = np.asarray(material_ids, dtype=np.int32)
+        if len(arr) == triangle_count:
+            return arr
+        if len(arr) == triangle_count * 3:
+            return arr[::3]
+
+        out = np.full((triangle_count,), -1, dtype=np.int32)
+        count = min(triangle_count, len(arr))
+        out[:count] = arr[:count]
+        return out
 
 
     def _build_material_palette(self, materials):
@@ -257,18 +241,6 @@ class IfcVtkMeshHelper:
                 return None
 
         return self._to_float(value)
-
-
-    def _resolve_material_index(self, material_ids, triangle_count, triangle_index, face_index):
-
-        if not material_ids:
-            return None
-
-        if len(material_ids) == triangle_count:
-            return material_ids[triangle_index]
-        if len(material_ids) == triangle_count * 3 and face_index < len(material_ids):
-            return material_ids[face_index]
-        return material_ids[triangle_index] if triangle_index < len(material_ids) else None
 
 
     def _style_signature_from_palette(self, palette, material_index):

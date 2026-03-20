@@ -10,11 +10,11 @@ Plugin support is intended to make the viewer useful for workflows such as cost 
 
 Is it finished? Not even close. The main functionality exists, but it still needs testing and optimization. Current roadmap:
 
-- UI development
-- Loading IFC data
-- Navigating mesh geometry
-- Displaying objects in the context of spatial containment relations (treeview)
-- Displaying property sets for selected elements
+- UI development                                                                (ongoing)
+- Loading IFC data                                                              (completed)
+- Navigating mesh geometry                                                      (completed)
+- Displaying objects in the context of spatial containment relations (treeview) (completed)
+- Displaying property sets for selected elements                                (pending)
 - SQL-native data management
 - Model navigation and object selection
 - API interfacing

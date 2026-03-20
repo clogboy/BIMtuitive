@@ -1,4 +1,5 @@
 ifcopenshell
-vtk
+vispy
+numpy
 PyQt6
 sqlite-utils
