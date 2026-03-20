@@ -18,7 +18,7 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
         self.interactor = self.render_window.GetInteractor()
 
-        self._z_up = (0.0, 0.0, -1.0)
+        self._z_up = (0.0, 0.0, 1.0)
 
         style = vtk.vtkInteractorStyleTerrain()
         self.interactor.SetInteractorStyle(style)
