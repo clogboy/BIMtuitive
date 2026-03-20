@@ -19,6 +19,7 @@ class VTKViewer(QVTKRenderWindowInteractor):
         self.interactor = self.render_window.GetInteractor()
 
         self._z_up = (0.0, 0.0, 1.0)
+        self._up_blend = 0.22
 
         style = vtk.vtkInteractorStyleTerrain()
         self.interactor.SetInteractorStyle(style)
@@ -26,6 +27,7 @@ class VTKViewer(QVTKRenderWindowInteractor):
         camera = self.renderer.GetActiveCamera()
         camera.SetViewUp(*self._z_up)
 
+        self.interactor.AddObserver(vtk.vtkCommand.InteractionEvent, self._stabilize_z_up)
         self.interactor.AddObserver(vtk.vtkCommand.EndInteractionEvent, self._enforce_z_up)
 
         self._interactor_initialized = False
@@ -40,6 +42,22 @@ class VTKViewer(QVTKRenderWindowInteractor):
         camera.SetViewUp(*self._z_up)
         camera.OrthogonalizeViewUp()
 
+
+    def _stabilize_z_up(self, _obj=None, _event=None):
+        camera = self.renderer.GetActiveCamera()
+        current = camera.GetViewUp()
+
+        bx = current[0] * (1.0 - self._up_blend) + self._z_up[0] * self._up_blend
+        by = current[1] * (1.0 - self._up_blend) + self._z_up[1] * self._up_blend
+        bz = current[2] * (1.0 - self._up_blend) + self._z_up[2] * self._up_blend
+
+        mag = (bx * bx + by * by + bz * bz) ** 0.5
+        if mag == 0.0:
+            return
+
+        camera.SetViewUp(bx / mag, by / mag, bz / mag)
+
+
     def showEvent(self, event: QShowEvent):
 
         super().showEvent(event)
@@ -48,7 +66,6 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
     def closeEvent(self, event: QCloseEvent):
 
-        # Ensure VTK/X11 resources are released before Qt thread teardown.
         if self._interactor_initialized:
             self.interactor.Disable()
             self.render_window.Finalize()
@@ -69,13 +86,21 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
     def _setup_scene(self):
 
-        self.renderer.SetBackground(0.1, 0.1, 0.15)
+        self.renderer.SetBackground(0.62, 0.78, 0.92)
         self.renderer.SetUseDepthPeeling(False)
         self.renderer.SetMaximumNumberOfPeels(4)
         self.renderer.SetOcclusionRatio(0.2)
 
         self.render_window.SetAlphaBitPlanes(0)
         self.render_window.SetMultiSamples(0)
+
+        light = vtk.vtkLight()
+        light.SetLightTypeToSceneLight()
+        light.SetPosition(0.0, 0.0, 5000.0)
+        light.SetFocalPoint(0.0, 0.0, 0.0)
+        light.SetColor(0.85, 0.88, 0.92)
+        light.SetIntensity(1.2)
+        self.renderer.AddLight(light)
 
         self.renderer.ResetCamera()
 
