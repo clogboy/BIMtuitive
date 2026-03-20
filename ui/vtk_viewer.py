@@ -88,9 +88,6 @@ class VTKViewer(QVTKRenderWindowInteractor):
 
         self.renderer.SetBackground(0.62, 0.78, 0.92)
         self.renderer.SetUseDepthPeeling(False)
-        self.renderer.SetMaximumNumberOfPeels(4)
-        self.renderer.SetOcclusionRatio(0.2)
-
         self.render_window.SetAlphaBitPlanes(0)
         self.render_window.SetMultiSamples(0)
 
@@ -125,7 +122,16 @@ class VTKViewer(QVTKRenderWindowInteractor):
         if count == 0 or not actors:
             return 0
 
-        self._model_actors = actors
+        opaque = []
+        translucent = []
+        for actor in actors:
+            prop = actor.GetProperty()
+            if prop is not None and prop.GetOpacity() < 0.999:
+                translucent.append(actor)
+            else:
+                opaque.append(actor)
+
+        self._model_actors = opaque + translucent
         for actor in self._model_actors:
             self.renderer.AddActor(actor)
 

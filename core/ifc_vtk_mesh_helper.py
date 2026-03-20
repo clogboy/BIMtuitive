@@ -97,11 +97,12 @@ class IfcVtkMeshHelper:
         prop = actor.GetProperty()
         prop.SetColor(signature[0], signature[1], signature[2])
         prop.SetOpacity(signature[3])
-        prop.SetInterpolationToPBR()
-        prop.SetMetallic(0.1)
-        prop.SetRoughness(max(0.12, min(0.95, 1.0 - signature[4] * 0.75)))
-        prop.SetOcclusionStrength(1.0)
-        prop.BackfaceCullingOn()
+        prop.SetInterpolationToPhong()
+        prop.SetAmbient(0.15)
+        prop.SetDiffuse(0.85)
+        prop.SetSpecular(min(0.2, signature[4]))
+        prop.SetSpecularPower(20.0)
+        prop.BackfaceCullingOff()
 
         return actor
 

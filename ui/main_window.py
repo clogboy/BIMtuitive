@@ -191,6 +191,7 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self.tree.setUpdatesEnabled(False)
         self.tree.blockSignals(True)
+        self.tree.setSortingEnabled(True)        
 
         try:
             root_item = self._create_node_item(node)
