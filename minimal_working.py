@@ -1,11 +1,15 @@
 import sys
+import os
+from typing import Any
 import numpy as np
 import ifcopenshell
 import ifcopenshell.geom
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter,
                              QFileDialog, QToolBar)
 from PyQt6.QtCore import QAbstractItemModel, QModelIndex, Qt, QRunnable, pyqtSignal, QObject, QThreadPool, pyqtSlot
 from vispy import scene
+from vispy.color import Color
+from vispy.scene.visuals import Mesh
 
 # --- 1. IFC Boomstructuur Logica ---
 class IfcTreeItem:
@@ -47,25 +51,25 @@ class IfcTreeModel(QAbstractItemModel):
             for el in rel.RelatedElements:
                 parent_item.append_child(IfcTreeItem(el, parent_item))
 
-    def index(self, r, c, p):
-        if not self.hasIndex(r, c, p): return QModelIndex()
-        parent = p.internalPointer() if p.isValid() else self.root_item
-        return self.createIndex(r, c, parent.child(r))
+    def index(self, row, column, parent=QModelIndex()):
+        if not self.hasIndex(row, column, parent): return QModelIndex()
+        parent_item = parent.internalPointer() if parent.isValid() else self.root_item
+        return self.createIndex(row, column, parent_item.child(row))
 
-    def parent(self, idx):
-        if not idx.isValid(): return QModelIndex()
-        child = idx.internalPointer()
-        parent = child.parent_item
-        return QModelIndex() if parent == self.root_item else self.createIndex(parent.row(), 0, parent)
+    def parent(self, child):  # type: ignore[override]
+        if not child.isValid(): return QModelIndex()
+        child_item = child.internalPointer()
+        parent_item = child_item.parent_item
+        return QModelIndex() if parent_item == self.root_item else self.createIndex(parent_item.row(), 0, parent_item)
 
-    def rowCount(self, p):
-        if p.column() > 0: return 0
-        return (p.internalPointer() if p.isValid() else self.root_item).child_count()
+    def rowCount(self, parent=QModelIndex()):
+        if parent.column() > 0: return 0
+        return (parent.internalPointer() if parent.isValid() else self.root_item).child_count()
 
-    def columnCount(self, p): return 1
-    def data(self, idx, role):
-        if idx.isValid() and role == Qt.ItemDataRole.DisplayRole:
-            return idx.internalPointer().display_name
+    def columnCount(self, parent=QModelIndex()): return 1
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if index.isValid() and role == Qt.ItemDataRole.DisplayRole:
+            return index.internalPointer().display_name
         return None
 
 # --- 2. Geometrie Worker (Threading) ---
@@ -81,15 +85,14 @@ class MeshWorker(QRunnable):
     def run(self):
         try:
             shape = ifcopenshell.geom.create_shape(self.settings, self.element)
-            v_raw = np.array(shape.geometry.verts, dtype=np.float32).reshape(-1, 3)
-            # Voorkom jitter door te centreren op lokaal nulpunt
-            center = np.mean(v_raw, axis=0)
-            v = v_raw - center
-            f = np.array(shape.geometry.faces, dtype=np.uint32).reshape(-1, 3)
-            # Gebruik dummy normalen als generator faalt
+            geom: Any = getattr(shape, "geometry", shape)
+            v_raw = np.asarray(geom.verts, dtype=np.float32).reshape(-1, 3)
+            # Lokale centering: corrigeert RD-offset voor enkel element
+            v = v_raw - v_raw[0]
+            f = np.asarray(geom.faces, dtype=np.uint32).reshape(-1, 3)
             try:
-                n = np.array(shape.geometry.normals, dtype=np.float32).reshape(-1, 3)
-            except:
+                n = np.asarray(geom.normals, dtype=np.float32).reshape(-1, 3)
+            except Exception:
                 n = np.zeros_like(v)
             self.signals.ready.emit(v, f, n)
         except Exception as e:
@@ -103,29 +106,31 @@ class FullModelWorker(QRunnable):
     @pyqtSlot()
     def run(self):
         try:
-            # Gebruik de iterator voor snelheid en multiprocessing
-            iterator = ifcopenshell.geom.iterator(self.settings, self.model, multiprocessing=True)
+            num_threads = max(1, (os.cpu_count() or 2) - 1)
+            iterator = ifcopenshell.geom.iterator(self.settings, self.model, num_threads)
             all_verts, all_faces = [], []
             offset = 0
+            world_origin = None  # Eénmalige RD-offset, gezet op eerste vertex
 
             if iterator.initialize():
                 while True:
                     shape = iterator.get()
-                    v = np.array(shape.geometry.verts, dtype=np.float32).reshape(-1, 3)
-                    f = np.array(shape.geometry.faces, dtype=np.uint32).reshape(-1, 3)
-                    
-                    all_verts.append(v)
-                    all_faces.append(f + offset) # Verschuif indices voor de gecombineerde buffer
-                    offset += len(v)
-                    
+                    geom: Any = getattr(shape, "geometry", shape)
+                    v = np.asarray(geom.verts, dtype=np.float32).reshape(-1, 3)
+                    f = np.asarray(geom.faces, dtype=np.uint32).reshape(-1, 3)
+                    if len(v) and len(f):
+                        if world_origin is None:
+                            world_origin = v[0].copy()
+                        v -= world_origin  # in-place, geen extra kopie
+                        all_verts.append(v)
+                        all_faces.append(f + offset)
+                        offset += len(v)
                     if not iterator.next(): break
 
             if all_verts:
                 v_final = np.concatenate(all_verts)
                 f_final = np.concatenate(all_faces)
-                # Centreer het HELE model rond 0,0,0
-                center = np.mean(v_final, axis=0)
-                self.signals.ready.emit(v_final - center, f_final, np.zeros_like(v_final))
+                self.signals.ready.emit(v_final, f_final, np.zeros((len(v_final), 3), dtype=np.float32))
         except Exception as e:
             print(f"Fout bij laden model: {e}")
 
@@ -140,9 +145,6 @@ class IFCViewer(QMainWindow):
         # 1. IFC Settings (één keer correct instellen)
         self.geom_settings = ifcopenshell.geom.settings()
         self.geom_settings.set(self.geom_settings.USE_WORLD_COORDS, True)
-        try:
-            self.geom_settings.set(13, True) # GENERATE_NORMALS index
-        except: pass
 
         # 2. UI Layout
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -157,7 +159,7 @@ class IFCViewer(QMainWindow):
         self.view.camera = 'turntable'
         
         # Initialiseer Mesh met een opvallende kleur
-        self.mesh_visual = scene.visuals.Mesh(shading='flat', color='royalblue', parent=self.view.scene)
+        self.mesh_visual = Mesh(shading='flat', color=Color('royalblue'), parent=self.view.scene)
         splitter.addWidget(self.canvas.native)
         
         self.setCentralWidget(splitter)
@@ -166,7 +168,8 @@ class IFCViewer(QMainWindow):
         toolbar = QToolBar()
         self.addToolBar(toolbar)
         load_act = toolbar.addAction("Open IFC Bestand")
-        load_act.triggered.connect(self.open_file)
+        if load_act is not None:
+            load_act.triggered.connect(self.open_file)
 
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Selecteer IFC", "", "IFC Files (*.ifc)")
@@ -175,7 +178,9 @@ class IFCViewer(QMainWindow):
             model = ifcopenshell.open(path)
             self.ifc_model = IfcTreeModel(model)
             self.tree_view.setModel(self.ifc_model)
-            self.tree_view.selectionModel().selectionChanged.connect(self.on_select)
+            sel = self.tree_view.selectionModel()
+            if sel is not None:
+                sel.selectionChanged.connect(self.on_select)
 
             worker = FullModelWorker(model, self.geom_settings)
             worker.signals.ready.connect(self.update_view)
@@ -199,8 +204,7 @@ class IFCViewer(QMainWindow):
         # Update mesh data
         self.mesh_visual.set_data(vertices=v, faces=f)
         
-        # Reset camera naar het object
-        self.view.camera.center = (0, 0, 0)
+        # Fit camera direct op de nieuwe mesh bounds
         self.view.camera.set_range(margin=0.1)
         
         self.mesh_visual.update()
