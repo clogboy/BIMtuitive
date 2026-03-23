@@ -3,7 +3,7 @@ import numpy as np
 import ifcopenshell
 import ifcopenshell.geom
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter, 
-                             QFileDialog, QToolBar, QVBoxLayout, QWidget)
+                             QFileDialog, QToolBar)
 from PyQt6.QtCore import QAbstractItemModel, QModelIndex, Qt, QRunnable, pyqtSignal, QObject, QThreadPool, pyqtSlot
 from vispy import scene
 
@@ -14,7 +14,7 @@ class IfcTreeItem:
         self.parent_item = parent
         self.child_items = []
         if ifc_object:
-            name = getattr(ifc_object, "Name", "") or "Unnamed"
+            name = getattr(ifc_object, "Name", "") or "Naamloos"
             self.display_name = f"[{ifc_object.is_a()}] {name} (#{ifc_object.id()})"
         else:
             self.display_name = "Project Root"
@@ -38,13 +38,11 @@ class IfcTreeModel(QAbstractItemModel):
         self.layoutChanged.emit()
 
     def _recursive_add(self, ifc_obj, parent_item):
-        # Aggregatie (Decompositie)
         for rel in getattr(ifc_obj, "IsDecomposedBy", []):
             for sub in rel.RelatedObjects:
                 child = IfcTreeItem(sub, parent_item)
                 parent_item.append_child(child)
                 self._recursive_add(sub, child)
-        # Inhoud (Spatiale structuur)
         for rel in getattr(ifc_obj, "ContainsElements", []):
             for el in rel.RelatedElements:
                 parent_item.append_child(IfcTreeItem(el, parent_item))
@@ -84,90 +82,128 @@ class MeshWorker(QRunnable):
         try:
             shape = ifcopenshell.geom.create_shape(self.settings, self.element)
             v_raw = np.array(shape.geometry.verts, dtype=np.float32).reshape(-1, 3)
+            # Voorkom jitter door te centreren op lokaal nulpunt
             center = np.mean(v_raw, axis=0)
             v = v_raw - center
             f = np.array(shape.geometry.faces, dtype=np.uint32).reshape(-1, 3)
-            n = np.array(shape.geometry.normals, dtype=np.float32).reshape(-1, 3)
+            # Gebruik dummy normalen als generator faalt
+            try:
+                n = np.array(shape.geometry.normals, dtype=np.float32).reshape(-1, 3)
+            except:
+                n = np.zeros_like(v)
             self.signals.ready.emit(v, f, n)
-        except: pass
+        except Exception as e:
+            print(f"Geometrie fout voor #{self.element.id()}: {e}")
+
+class FullModelWorker(QRunnable):
+    def __init__(self, model, settings):
+        super().__init__()
+        self.model, self.settings, self.signals = model, settings, MeshSignals()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            # Gebruik de iterator voor snelheid en multiprocessing
+            iterator = ifcopenshell.geom.iterator(self.settings, self.model, multiprocessing=True)
+            all_verts, all_faces = [], []
+            offset = 0
+
+            if iterator.initialize():
+                while True:
+                    shape = iterator.get()
+                    v = np.array(shape.geometry.verts, dtype=np.float32).reshape(-1, 3)
+                    f = np.array(shape.geometry.faces, dtype=np.uint32).reshape(-1, 3)
+                    
+                    all_verts.append(v)
+                    all_faces.append(f + offset) # Verschuif indices voor de gecombineerde buffer
+                    offset += len(v)
+                    
+                    if not iterator.next(): break
+
+            if all_verts:
+                v_final = np.concatenate(all_verts)
+                f_final = np.concatenate(all_faces)
+                # Centreer het HELE model rond 0,0,0
+                center = np.mean(v_final, axis=0)
+                self.signals.ready.emit(v_final - center, f_final, np.zeros_like(v_final))
+        except Exception as e:
+            print(f"Fout bij laden model: {e}")
 
 # --- 3. Hoofdscherm ---
 class IFCViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PyQt6 IFC + VisPy Viewer")
-        self.resize(1200, 800)
+        self.setWindowTitle("BIMtuitive Minimal IFC Viewer")
+        self.resize(1280, 720)
         self.thread_pool = QThreadPool()
+        
+        # 1. IFC Settings (één keer correct instellen)
         self.geom_settings = ifcopenshell.geom.settings()
         self.geom_settings.set(self.geom_settings.USE_WORLD_COORDS, True)
-        # IFC-instellingen voor mesh
-        self.geom_settings = ifcopenshell.geom.settings()
-        self.geom_settings.set(self.geom_settings.USE_WORLD_COORDS, True)
-
-        # Als GENERATE_NORMALS niet direct werkt, gebruik de 'valse' boolean setter 
-        # of controleer of je versie 'INCLUDE_CURVES' etc. ondersteunt.
-        # Voor de meeste moderne versies is dit de juiste manier:
         try:
-            # Probeer de directe boolean setter
-            self.geom_settings.set(13, True)
-        except:
-            # Fallback: sommige versies gebruiken een integer constante
-            # 1 is meestal de index voor 'generate normals' in de C++ core
-            pass 
+            self.geom_settings.set(13, True) # GENERATE_NORMALS index
+        except: pass
 
-        # UI Layout
+        # 2. UI Layout
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.tree_view = QTreeView()
+        self.tree_view.setHeaderHidden(True)
         splitter.addWidget(self.tree_view)
         
-        # VisPy Canvas
-        self.canvas = scene.SceneCanvas(keys='interactive', show=True, bgcolor='lightblue')
+        # 3. VisPy Canvas Setup
+        self.canvas = scene.SceneCanvas(keys='interactive', show=True, bgcolor='white')
         self.view = self.canvas.central_widget.add_view()
-        self.view.bgcolor = 'lightblue'
+        self.view.bgcolor = '#f0f0f0' # Iets grijzere viewport voor contrast
         self.view.camera = 'turntable'
-        self.mesh_visual = scene.visuals.Mesh(shading='flat', parent=self.view.scene)
+        
+        # Initialiseer Mesh met een opvallende kleur
+        self.mesh_visual = scene.visuals.Mesh(shading='flat', color='royalblue', parent=self.view.scene)
         splitter.addWidget(self.canvas.native)
         
         self.setCentralWidget(splitter)
         
-        # Toolbar
+        # 4. Toolbar
         toolbar = QToolBar()
         self.addToolBar(toolbar)
-        load_act = toolbar.addAction("Open IFC")
+        load_act = toolbar.addAction("Open IFC Bestand")
         load_act.triggered.connect(self.open_file)
 
     def open_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open IFC", "", "IFC Files (*.ifc)")
+        path, _ = QFileDialog.getOpenFileName(self, "Selecteer IFC", "", "IFC Files (*.ifc)")
         if path:
+            print(f"Laden: {path}")
             model = ifcopenshell.open(path)
             self.ifc_model = IfcTreeModel(model)
             self.tree_view.setModel(self.ifc_model)
             self.tree_view.selectionModel().selectionChanged.connect(self.on_select)
 
+            worker = FullModelWorker(model, self.geom_settings)
+            worker.signals.ready.connect(self.update_view)
+            self.thread_pool.start(worker)
+
     def on_select(self, selected, _):
         if not selected.indexes(): return
         item = selected.indexes()[0].internalPointer()
+        
+        # Alleen geometrie berekenen voor elementen, niet voor containers
         if item.ifc_object and item.ifc_object.is_a("IfcElement"):
             worker = MeshWorker(item.ifc_object, self.geom_settings)
             worker.signals.ready.connect(self.update_view)
             self.thread_pool.start(worker)
 
     def update_view(self, v, f, n):
-        if v is None or len(v) == 0:
-            print("Geen geometrie data gevonden voor dit element.")
-            return
+        if v.size == 0: return
         
-        try:
-            # VisPy gebruikt vaak 'normals' in plaats van 'vertex_normals'
-            # Shading='smooth' moet aanstaan in de constructor van de Mesh (zie hieronder)
-            self.mesh_visual.set_data(vertices=v, faces=f)
-        except Exception as e:
-            print(f"Vispy error: {e}")
+        print(f"Rendering element met {len(v)} vertices...")
         
-        # Forceer de camera om het object te centreren
+        # Update mesh data
         self.mesh_visual.set_data(vertices=v, faces=f)
+        
+        # Reset camera naar het object
         self.view.camera.center = (0, 0, 0)
-        self.view.camera.set_range()
+        self.view.camera.set_range(margin=0.1)
+        
+        self.mesh_visual.update()
         self.canvas.update()
 
 if __name__ == "__main__":
