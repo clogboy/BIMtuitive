@@ -4,9 +4,22 @@ from typing import Any
 import numpy as np
 import ifcopenshell
 import ifcopenshell.geom
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter,
-                             QFileDialog, QToolBar)
-from PyQt6.QtCore import QAbstractItemModel, QModelIndex, Qt, QRunnable, pyqtSignal, QObject, QThreadPool, pyqtSlot
+from PyQt6.QtWidgets import (
+    QApplication, 
+    QMainWindow, 
+    QTreeView, 
+    QSplitter, 
+    QFileDialog, 
+    QToolBar,)
+from PyQt6.QtCore import (
+    QAbstractItemModel, 
+    QModelIndex, 
+    Qt, 
+    QRunnable, 
+    pyqtSignal, 
+    QObject, 
+    QThreadPool, 
+    pyqtSlot,)
 from vispy import scene
 from vispy.color import Color
 from vispy.scene.visuals import Mesh
