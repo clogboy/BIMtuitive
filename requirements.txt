@@ -1,4 +1,0 @@
-ifcopenshell
-vispy
-numpy
-PyQt6
