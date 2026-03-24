@@ -2,4 +2,3 @@ ifcopenshell
 vispy
 numpy
 PyQt6
-sqlite-utils

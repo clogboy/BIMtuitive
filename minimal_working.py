@@ -1,15 +1,20 @@
-import sys
 import os
-from typing import Any
-import numpy as np
+import sys
+
+if sys.platform.startswith("linux") and not os.environ.get("QT_QPA_PLATFORM"):
+    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+    if os.environ.get("WAYLAND_DISPLAY") or session_type == "wayland":
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
 import ifcopenshell
-import ifcopenshell.geom
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter,
-                             QFileDialog, QToolBar)
-from PyQt6.QtCore import QAbstractItemModel, QModelIndex, Qt, QRunnable, pyqtSignal, QObject, QThreadPool, pyqtSlot
-from vispy import scene
-from vispy.color import Color
-from vispy.scene.visuals import Mesh
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QTreeView, QSplitter, 
+                             QFileDialog, QToolBar, QStatusBar, QProgressBar)
+from PyQt6.QtCore import QAbstractItemModel, QModelIndex, Qt, QThreadPool
+from vispy import app, scene
+
+from ifc_geometry import IfcGeometryController
+
+app.use_app("pyqt6")
 
 # --- 1. IFC Boomstructuur Logica ---
 class IfcTreeItem:
@@ -51,88 +56,26 @@ class IfcTreeModel(QAbstractItemModel):
             for el in rel.RelatedElements:
                 parent_item.append_child(IfcTreeItem(el, parent_item))
 
-    def index(self, row, column, parent=QModelIndex()):
-        if not self.hasIndex(row, column, parent): return QModelIndex()
-        parent_item = parent.internalPointer() if parent.isValid() else self.root_item
-        return self.createIndex(row, column, parent_item.child(row))
+    def index(self, r, c, p):
+        if not self.hasIndex(r, c, p): return QModelIndex()
+        parent = p.internalPointer() if p.isValid() else self.root_item
+        return self.createIndex(r, c, parent.child(r))
 
-    def parent(self, child):  # type: ignore[override]
-        if not child.isValid(): return QModelIndex()
-        child_item = child.internalPointer()
-        parent_item = child_item.parent_item
-        return QModelIndex() if parent_item == self.root_item else self.createIndex(parent_item.row(), 0, parent_item)
+    def parent(self, idx):
+        if not idx.isValid(): return QModelIndex()
+        child = idx.internalPointer()
+        parent = child.parent_item
+        return QModelIndex() if parent == self.root_item else self.createIndex(parent.row(), 0, parent)
 
-    def rowCount(self, parent=QModelIndex()):
-        if parent.column() > 0: return 0
-        return (parent.internalPointer() if parent.isValid() else self.root_item).child_count()
+    def rowCount(self, p):
+        if p.column() > 0: return 0
+        return (p.internalPointer() if p.isValid() else self.root_item).child_count()
 
-    def columnCount(self, parent=QModelIndex()): return 1
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if index.isValid() and role == Qt.ItemDataRole.DisplayRole:
-            return index.internalPointer().display_name
+    def columnCount(self, p): return 1
+    def data(self, idx, role):
+        if idx.isValid() and role == Qt.ItemDataRole.DisplayRole:
+            return idx.internalPointer().display_name
         return None
-
-# --- 2. Geometrie Worker (Threading) ---
-class MeshSignals(QObject):
-    ready = pyqtSignal(np.ndarray, np.ndarray, np.ndarray)
-
-class MeshWorker(QRunnable):
-    def __init__(self, element, settings):
-        super().__init__()
-        self.element, self.settings, self.signals = element, settings, MeshSignals()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            shape = ifcopenshell.geom.create_shape(self.settings, self.element)
-            geom: Any = getattr(shape, "geometry", shape)
-            v_raw = np.asarray(geom.verts, dtype=np.float32).reshape(-1, 3)
-            # Lokale centering: corrigeert RD-offset voor enkel element
-            v = v_raw - v_raw[0]
-            f = np.asarray(geom.faces, dtype=np.uint32).reshape(-1, 3)
-            try:
-                n = np.asarray(geom.normals, dtype=np.float32).reshape(-1, 3)
-            except Exception:
-                n = np.zeros_like(v)
-            self.signals.ready.emit(v, f, n)
-        except Exception as e:
-            print(f"Geometrie fout voor #{self.element.id()}: {e}")
-
-class FullModelWorker(QRunnable):
-    def __init__(self, model, settings):
-        super().__init__()
-        self.model, self.settings, self.signals = model, settings, MeshSignals()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            num_threads = max(1, (os.cpu_count() or 2) - 1)
-            iterator = ifcopenshell.geom.iterator(self.settings, self.model, num_threads)
-            all_verts, all_faces = [], []
-            offset = 0
-            world_origin = None  # Eénmalige RD-offset, gezet op eerste vertex
-
-            if iterator.initialize():
-                while True:
-                    shape = iterator.get()
-                    geom: Any = getattr(shape, "geometry", shape)
-                    v = np.asarray(geom.verts, dtype=np.float32).reshape(-1, 3)
-                    f = np.asarray(geom.faces, dtype=np.uint32).reshape(-1, 3)
-                    if len(v) and len(f):
-                        if world_origin is None:
-                            world_origin = v[0].copy()
-                        v -= world_origin  # in-place, geen extra kopie
-                        all_verts.append(v)
-                        all_faces.append(f + offset)
-                        offset += len(v)
-                    if not iterator.next(): break
-
-            if all_verts:
-                v_final = np.concatenate(all_verts)
-                f_final = np.concatenate(all_faces)
-                self.signals.ready.emit(v_final, f_final, np.zeros((len(v_final), 3), dtype=np.float32))
-        except Exception as e:
-            print(f"Fout bij laden model: {e}")
 
 # --- 3. Hoofdscherm ---
 class IFCViewer(QMainWindow):
@@ -141,11 +84,13 @@ class IFCViewer(QMainWindow):
         self.setWindowTitle("BIMtuitive Minimal IFC Viewer")
         self.resize(1280, 720)
         self.thread_pool = QThreadPool()
+        self._selection_model = None
+        self._active_ifc_object = None
+        self._model_loading = False
+        self._current_model_path = None
+        self.geometry_controller = IfcGeometryController()
+        self._model_loading_total = 0
         
-        # 1. IFC Settings (één keer correct instellen)
-        self.geom_settings = ifcopenshell.geom.settings()
-        self.geom_settings.set(self.geom_settings.USE_WORLD_COORDS, True)
-
         # 2. UI Layout
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.tree_view = QTreeView()
@@ -153,16 +98,26 @@ class IFCViewer(QMainWindow):
         splitter.addWidget(self.tree_view)
         
         # 3. VisPy Canvas Setup
-        self.canvas = scene.SceneCanvas(keys='interactive', show=True, bgcolor='white')
+        self.canvas = scene.SceneCanvas(keys='interactive', show=False, bgcolor='white')
         self.view = self.canvas.central_widget.add_view()
         self.view.bgcolor = '#f0f0f0' # Iets grijzere viewport voor contrast
-        self.view.camera = 'turntable'
+        self.view.camera = scene.cameras.TurntableCamera(fov=45, up='z', azimuth=45, elevation=20)
         
-        # Initialiseer Mesh met een opvallende kleur
-        self.mesh_visual = Mesh(shading='flat', color=Color('royalblue'), parent=self.view.scene)
+        # Toon het volledige model als basislaag en selectie als overlay.
+        self.model_mesh_visual = self.geometry_controller.create_mesh_visual(self.view.scene, color='#c4c8cf')
+        self.selection_mesh_visual = self.geometry_controller.create_mesh_visual(self.view.scene, color='royalblue')
         splitter.addWidget(self.canvas.native)
         
         self.setCentralWidget(splitter)
+
+        self.status_bar = QStatusBar(self)
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Klaar")
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMinimumWidth(220)
+        self.status_bar.addPermanentWidget(self.progress_bar)
         
         # 4. Toolbar
         toolbar = QToolBar()
@@ -175,40 +130,96 @@ class IFCViewer(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Selecteer IFC", "", "IFC Files (*.ifc)")
         if path:
             print(f"Laden: {path}")
+            self._current_model_path = path
             model = ifcopenshell.open(path)
+            self.geometry_controller.clear_model_cache()
+            self.geometry_controller.reset()
+            self.geometry_controller.clear_visual(self.model_mesh_visual, self.canvas)
+            self.geometry_controller.clear_visual(self.selection_mesh_visual, self.canvas)
+            self._active_ifc_object = None
             self.ifc_model = IfcTreeModel(model)
             self.tree_view.setModel(self.ifc_model)
-            sel = self.tree_view.selectionModel()
-            if sel is not None:
-                sel.selectionChanged.connect(self.on_select)
+            selection_model = self.tree_view.selectionModel()
+            if self._selection_model is not None:
+                try:
+                    self._selection_model.selectionChanged.disconnect(self.on_select)
+                except TypeError:
+                    pass
+            if selection_model is not None:
+                selection_model.selectionChanged.connect(self.on_select)
+                self._selection_model = selection_model
 
-            worker = FullModelWorker(model, self.geom_settings)
-            worker.signals.ready.connect(self.update_view)
-            self.thread_pool.start(worker)
+            cached_model_mesh = self.geometry_controller.get_cached_model_mesh(path)
+            if cached_model_mesh is not None:
+                self._model_loading = False
+                self.progress_bar.setVisible(False)
+                self.status_bar.showMessage("Volledig model geladen (cache)")
+                self.update_model_view(cached_model_mesh)
+                self.canvas.update()
+                return
+
+            model_worker = self.geometry_controller.create_model_worker(path)
+            model_worker.signals.ready.connect(self.update_model_view)
+            model_worker.signals.progress.connect(self.update_model_progress)
+            model_worker.signals.done.connect(self.finish_model_progress)
+            self._model_loading = True
+            self.thread_pool.start(model_worker)
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setVisible(True)
+            self.status_bar.showMessage("Volledig model wordt opgebouwd...")
+            self.canvas.update()
 
     def on_select(self, selected, _):
         if not selected.indexes(): return
+        if self._model_loading:
+            return
+
         item = selected.indexes()[0].internalPointer()
         
-        # Alleen geometrie berekenen voor elementen, niet voor containers
-        if item.ifc_object and item.ifc_object.is_a("IfcElement"):
-            worker = MeshWorker(item.ifc_object, self.geom_settings)
-            worker.signals.ready.connect(self.update_view)
+        if self.geometry_controller.can_render(item.ifc_object):
+            self._active_ifc_object = item.ifc_object
+
+            cached_mesh = self.geometry_controller.get_cached_mesh(item.ifc_object)
+            if cached_mesh is not None:
+                self.update_selection_view(cached_mesh)
+                return
+
+            worker = self.geometry_controller.create_worker(item.ifc_object)
+            worker.signals.ready.connect(self.update_selection_view)
             self.thread_pool.start(worker)
 
-    def update_view(self, v, f, n):
-        if v.size == 0: return
-        
-        print(f"Rendering element met {len(v)} vertices...")
-        
-        # Update mesh data
-        self.mesh_visual.set_data(vertices=v, faces=f)
-        
-        # Fit camera direct op de nieuwe mesh bounds
-        self.view.camera.set_range(margin=0.1)
-        
-        self.mesh_visual.update()
-        self.canvas.update()
+    def update_model_view(self, mesh_data):
+        if self._current_model_path:
+            self.geometry_controller.cache_model_mesh(self._current_model_path, mesh_data)
+        self.geometry_controller.set_model_mesh(mesh_data)
+        print(f"Rendering volledig model met {len(mesh_data.vertices)} vertices...")
+        self.geometry_controller.update_visual(self.model_mesh_visual, self.view, self.canvas, mesh_data, focus=True)
+
+    def update_model_progress(self, processed, total):
+        self._model_loading_total = total
+        if total <= 0:
+            self.progress_bar.setRange(0, 0)
+            self.status_bar.showMessage("Volledig model wordt opgebouwd...")
+            return
+
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(processed)
+        self.status_bar.showMessage(f"Model laden: {processed}/{total} producten")
+
+    def finish_model_progress(self, success):
+        self._model_loading = False
+        if success:
+            self.status_bar.showMessage("Volledig model geladen")
+        else:
+            self.status_bar.showMessage("Model laden voltooid zonder renderbare geometrie")
+        self.progress_bar.setVisible(False)
+
+    def update_selection_view(self, mesh_data):
+        if self._active_ifc_object is not None:
+            self.geometry_controller.cache_mesh(self._active_ifc_object, mesh_data)
+
+        print(f"Rendering element met {len(mesh_data.vertices)} vertices...")
+        self.geometry_controller.update_visual(self.selection_mesh_visual, self.view, self.canvas, mesh_data, focus=True)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
