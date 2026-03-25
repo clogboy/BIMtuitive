@@ -158,7 +158,7 @@ class MeshWorker(QRunnable):
 
 
 class FullModelWorker(QRunnable):
-    def __init__(self, model_path, settings, iterator_threads=5, use_iterator=True):
+    def __init__(self, model_path, settings, iterator_threads=5, use_iterator=False):
         super().__init__()
         self.model_path = model_path
         self.settings = settings
